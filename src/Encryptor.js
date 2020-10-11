@@ -8,11 +8,12 @@ module.exports = async(key) => {
         throw 'no key';
     }
 
-    return ({
+    return Object.freeze({
         encrypt: (msg) => {
             let nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
             return {
-                text: sodium.crypto_secretbox_easy(msg, nonce,key)
+                ciphertext: sodium.crypto_secretbox_easy(msg, nonce,key),
+                nonce: nonce
             }
         }
     })
