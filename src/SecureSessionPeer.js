@@ -1,28 +1,50 @@
-const _sodium = require('libsodium-wrappers');
+const sodium = require('libsodium-wrappers');
 
 const Decryptor = require('../src/Decryptor');
 const Encryptor = require('../src/Encryptor');
 
-module.exports = async() => {
-    await _sodium.ready;
-    const sodium = _sodium;
-    
+client = null;
+server = null;
 
-    const key = sodium.crypto_kx_keypair();
+module.exports = async () => {
+    await sodium.ready;
+    var hasPeers = null;
 
-    const encryptor = await Encryptor(key.privateKey);
-    const decryptor = await Decryptor(key.privateKey);
+    if (server == null) {
+        hasPeers = false;
+        var keys = sodium.crypto_kx_keypair();
+        server = {privateKey: keys.privateKey, publicKey: keys.publicKey}
 
+    } else {
+        hasPeers = true;
+        var keys = sodium.crypto_kx_keypair();
+        const keysForClient = sodium.crypto_kx_client_session_keys(keys.publicKey, keys.privateKey, server.publicKey);
+        const keysForServer = sodium.crypto_kx_server_session_keys(server.publicKey, server.privateKey, keys.publicKey);
 
-    return Object.freeze ({
-        publicKey: key.publicKey,
-        send: () => {},
-        receive: () => {},
-        encrypt: (msg) => {
-            return encryptor.encrypt(msg)
+        client = {privateKey: keys.privateKey, publicKey: keys.publicKey,decryptor: await Decryptor(keysForClient.sharedRx),
+            encryptor: await Encryptor(keysForClient.sharedTx)};
+
+        server.decryptor = await Decryptor(keysForServer.sharedRx);
+        server.encryptor = await Encryptor(keysForServer.sharedTx);
+    } 
+
+    return Object.freeze({
+        publicKey: hasPeers ? client.publicKey : server.publicKey,
+        send: (msg) => {hasPeers ? server.message = client.encryptor.encrypt(msg) : client.message = server.encryptor.encrypt(msg);},
+        receive: () => {
+            if (hasPeers) {
+                msg = client.message;
+                return client.decryptor.decrypt(msg.ciphertext, msg.nonce);
+            } else {
+                msg = server.message;
+                return server.decryptor.decrypt(msg.ciphertext, msg.nonce);
+            }
         },
-        decrypt: (text, nonce) => {
-            return decryptor.decrypt(text, nonce);
-        }
-    })
-}
+        encrypt: (msg) => {
+            var answer = null
+            hasPeers ? answer = client.encryptor.encrypt(msg) : answer = server.encryptor.encrypt(msg);
+            return answer;
+        },
+        decrypt: (ciphertext, nonce) => {return client.decryptor.decrypt(ciphertext, nonce)}
+    });
+};
